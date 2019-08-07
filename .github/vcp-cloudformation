@@ -1,0 +1,136 @@
+How to create a functional VPC using CloudFormation
+
+This tutorial walks through how to create a fully functional Virtual Private Cloud in AWS using CloudFormation. At the end of the tutorial, you will have a reproducible way to create a virtual cloud with three subnets, a security group, and an internet gateway with SSH access for your IP address. I’ve found this template useful for creating an isolated environment to develop and test software.
+
+Full code for this tutorial is available on Github.
+
+Preamble
+The only truly required component of a CloudFormation template is the Resources field. This field describes all of the AWS infrastructure that will be created by this template. The remainder of this tutorial will fill out the Resources field with all of the infrastructure required to create a standalone VPC.
+
+---
+AWSTemplateFormatVersion: 2010-09-09
+Resources:
+    ...
+In a real-world environment, you would leverage the Parameters and Mappings sections to make your template flexible enough to be customized, and you would leverage the Outputs section to capture any relevant AWS resource identifiers that have been created during the deployment. However, to keep things simple for this post, I will stick with defining AWS resources only.
+
+The VPC
+We start by creating the VPC. All CloudFormation resources have the same basic structure. The logical id of the resource acts as the top-level key defining the resource, and within this field is a Type section listing the CloudFormation resource type to create and Properties section defining the parameters to use when creating the Resource. In the following example, I am creating a Resource with the logical id VPC, and the specified Type and Properties.
+
+---
+AWSTemplateFormatVersion: 2010-09-09
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 172.31.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      InstanceTenancy: default
+The CloudFormation reference documentationdescribes each of the available Types and their Properties. You will be referring to this reference a lot as you learn to develop your own CloudFormation templates. In this example, I am declaring the following properties:
+
+CidrBlock: The IP address range available to this VPC.
+EnableDnsSupport: If set to true, AWS will resolve DNS hostnames to any instance within the VPC’s IP address.
+EnableDnsHostnames: If set to true, instances get allocated DNS hostnames by default.
+InstanceTenancy: By default, EC2 instances are launched on shared hardware, you can set this field to dedicated to launch instances on dedicated hardware (that is more expensive).
+The Internet Gateway
+An Internet Gateway is required to allow resources in a VPC to connect to the public Internet. Creating an Internet Gateway resource in CloudFormation is straightforward — there are no properties required.
+
+InternetGateway:
+  Type: AWS::EC2::InternetGateway
+Now, we need to attach the Gateway to our VPC. Each Gateway can be assigned to one and only one VPC and Amazon manages making the Gateway available across availability zones. To attach a Gateway to a VPC, you need to create a VPCGatewayAttachment resource, and reference the already created VPC and Internet Gateway resources using the !Ref intrinsic function.
+
+VPCGatewayAttachment:
+  Type: AWS::EC2::VPCGatewayAttachment
+  Properties:
+    VpcId: !Ref VPC
+    InternetGatewayId: !Ref InternetGateway
+Subnets
+Now, we create the subnets. In this example, I will create three subnets in three different availability zones. This can be adjusted or parameterized depending on your requirements.
+
+SubnetA:
+  Type: AWS::EC2::Subnet
+  Properties:
+    AvailabilityZone: us-east-1a
+    VpcId: !Ref VPC
+    CidrBlock: 172.31.0.0/20
+    MapPublicIpOnLaunch: true
+SubnetB:
+  Type: AWS::EC2::Subnet
+  Properties:
+    AvailabilityZone: us-east-1b
+    VpcId: !Ref VPC
+    CidrBlock: 172.31.16.0/20
+    MapPublicIpOnLaunch: true
+SubnetC:
+  Type: AWS::EC2::Subnet
+  Properties:
+    AvailabilityZone: us-east-1c
+    VpcId: !Ref VPC
+    CidrBlock: 172.31.32.0/20
+    MapPublicIpOnLaunch: true
+EC2 instances must be launched within a Subnet, and, by default instances do not have publicly accessible IP addresses. By setting MapPublicIpOnLaunch to true instances launched into the subnet will be allocated a public IP address by default. This means that any instances in this subnet will be reachable from the Internet via the Internet Gateway attached to the VPC.
+
+I’ve also subdivided the VPCs set of available IPs into three ranges using the CidrBlock property.
+
+Routing
+RouteTable:
+  Type: AWS::EC2::RouteTable
+  Properties:
+    VpcId: !Ref VPC
+InternetRoute:
+  Type: AWS::EC2::Route
+  DependsOn: VPCGatewayAttachment
+  Properties:
+    DestinationCidrBlock: 0.0.0.0/0
+    GatewayId: !Ref InternetGateway
+    RouteTableId: !Ref RouteTable
+According to the AWS documentation, any route entries that specify a gateway must specify a dependency on the gateway attachment resource. This is done using the DependsOn attribute.
+
+The DestinationCidrBlock specifies which traffic we want this route to be applied to. In this case, we apply it to all traffic using the 0.0.0.0/0 CIDR block. The GatewayId specifies where traffic matching the CIDR block should be directed.
+
+Finally, we need to associate the route table with the subnets using a SubnetRouteTableAssociation
+
+SubnetARouteTableAssociation:
+  Type: AWS::EC2::SubnetRouteTableAssociation
+  Properties:
+    RouteTableId: !Ref RouteTable
+    SubnetId: !Ref SubnetA
+SubnetBRouteTableAssociation:
+  Type: AWS::EC2::SubnetRouteTableAssociation
+  Properties:
+    RouteTableId: !Ref RouteTable
+    SubnetId: !Ref SubnetB
+SubnetCRouteTableAssociation:
+  Type: AWS::EC2::SubnetRouteTableAssociation
+  Properties:
+    RouteTableId: !Ref RouteTable
+    SubnetId: !Ref SubnetC
+The route table associations connect the route table to the subnet. With this in place any instances created within the subnet will be able to route traffic to and from the Internet.
+
+Security Groups
+The last required piece is attaching a security group to the subnet. A security group effectively describes the firewall rules to be applied to a subnet.
+
+SecurityGroup:
+  Type: AWS::EC2::SecurityGroup
+  Properties:
+    GroupName: "Internet Group"
+    GroupDescription: "SSH traffic in, all traffic out."
+    VpcId: !Ref VPC
+    SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '22'
+        ToPort: '22'
+        CidrIp: 0.0.0.0/0
+    SecurityGroupEgress:
+      - IpProtocol: -1
+        CidrIp: 0.0.0.0/0
+Security groups have a number of properties that can be configured:
+
+GroupDescription: A text field for documenting the behaviour of the security group.
+VpcId: The VPC where this security group will be used.
+SecurityGroupIngress: The incoming traffic we should allow.
+SecurityEgressGroup: The outgoing traffic we should allow.
+IpProtocol: The protocol of traffic to allow. -1 indicates any protocol.
+FromPort and ToPort: Describe a range of allowed ports.
+CidrIp: The range of IP addresses to allow traffic from.
+The security group created here allows all incoming traffic on port 22, allowing SSH access to EC2 instances, and allows all outgoing traffic.
