@@ -473,12 +473,6 @@ Resources:
         Fn::Base64:
           !Sub |
             #!/bin/bash -xe
-            # export http_proxy=http://${ProxyHost}:${ProxyPort}
-            # export https_proxy=http://${ProxyHost}:${ProxyPort}
-            # export no_proxy=localhost,127.0.0.1,169.254.169.254,10.0.2.0/24,192.168.99.0/24,.kdc.capitalone.com,.ds.capitalone.com,repo.${AWS::Region}.amazonaws.com
-            # echo "export http_proxy=http://${ProxyHost}:${ProxyPort}" > /etc/profile.d/proxy.sh
-            # echo "export https_proxy=http://${ProxyHost}:${ProxyPort}" >> /etc/profile.d/proxy.sh
-            # echo "export no_proxy=localhost,127.0.0.1,169.254.169.254,10.0.2.0/24,192.168.99.0/24,.kdc.capitalone.com,.ds.capitalone.com,repo.${AWS::Region}.amazonaws.com" >> /etc/profile.d/proxy.sh
             yum update -y
             yum install -y aws-cfn-bootstrap aws-cli cloud-init
             aws s3 cp s3://${S3DeployBucketName}/binaries/chef-${ChefRpmVersion}.el6.x86_64.rpm /tmp/ --sse && rpm -Uvh /tmp/chef-${ChefRpmVersion}.el6.x86_64.rpm
